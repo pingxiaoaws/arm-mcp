@@ -62,10 +62,10 @@ RECIPE_QUERY_MAP = load_recipe_query_map(QUERY_REGISTRY_PATH)
 
 
 def normalize_sql_query(query: str) -> str:
-        normalized = dedent(query).strip()
-        if not normalized.endswith(";"):
-                normalized += ";"
-        return normalized
+    normalized = dedent(query).strip()
+    if not normalized.endswith(";"):
+        normalized += ";"
+    return normalized
 
 
 def build_recipe_query(recipe: str, default_table: str, query_name: str = "default") -> str:
