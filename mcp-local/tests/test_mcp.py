@@ -95,14 +95,15 @@ def test_mcp_stdio_transport_responds(platform):
 
     repo_root = Path(__file__).resolve().parents[1]
     print("\n***Repo Root: ", repo_root)
-    dummy_ssh_material = "/workspace/utils/apx.py"
+    dummy_ssh_material_ssh = "/workspace/utils/apx.pem"
+    dummy_ssh_material_kh = "/workspace/utils/known_hosts"
     print("\n***Dummy SSH Path In Container: ", dummy_ssh_material)
 
     with (
         DockerContainer(image)
         .with_volume_mapping(str(repo_root), "/workspace")
-        .with_env("SSH_KEY_PATH", dummy_ssh_material)
-        .with_env("KNOWN_HOSTS_PATH", dummy_ssh_material)
+        .with_env("SSH_KEY_PATH", dummy_ssh_material_ssh)
+        .with_env("KNOWN_HOSTS_PATH", dummy_ssh_material_kh)
         .with_kwargs(stdin_open=True, tty=False)
     ) as container:
         wait_for_logs(container, "Starting MCP server", timeout=60)
