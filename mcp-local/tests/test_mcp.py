@@ -15,6 +15,7 @@
 import json
 import constants
 import os
+import subprocess
 import tempfile
 import time
 from pathlib import Path
@@ -101,26 +102,21 @@ def test_mcp_stdio_transport_responds(platform):
         temp_keys_path = Path(temp_keys_dir)
         pem_path = temp_keys_path / "ssh-key.pem"
         known_hosts_path = temp_keys_path / "known_hosts"
+        pub_key_path = temp_keys_path / "ssh-key.pem.pub"
 
-        pem_path.write_text(
-            "\n".join(
-                [
-                    "-----BEGIN OPENSSH PRIVATE KEY-----",
-                    "b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAlwAAAAdzc2gtcn",
-                    "NhAAAAAwEAAQAAAIEA7QO2Lx5cJ+oXn3W7N5B0vQxW8N6xY2P7FvY8Yh8n3H9q7o2Qh3oZc8",
-                    "Gx9nV7QeQ3mYh+0xN5j9oD7VYf1u8JvD2t3s0u5A8b2h0T5z3L4e6P9Q0Z1N2m3P4q5R6s7T8",
-                    "u9V0w1X2y3Z4AAABGQAAAB3NzaC1yc2EAAAADAQABAAAAgQDtA7YvHlw",
-                    "-----END OPENSSH PRIVATE KEY-----",
-                    "",
-                ]
-            ),
-            encoding="utf-8",
+        subprocess.run(
+            ["ssh-keygen", "-t", "ed25519", "-N", "", "-f", str(pem_path)],
+            check=True,
+            capture_output=True,
+            text=True,
         )
+        if pub_key_path.exists():
+            pub_key_path.unlink()
+
         known_hosts_path.write_text(
             "172.17.0.1 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFakeKnownHostKeyForIntegrationTestsOnly\n",
             encoding="utf-8",
         )
-        os.chmod(pem_path, 0o600)
         os.chmod(known_hosts_path, 0o644)
 
         print("\n***Generated Dummy SSH Key: ", pem_path)
