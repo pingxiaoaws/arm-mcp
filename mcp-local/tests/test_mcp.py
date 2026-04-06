@@ -15,6 +15,7 @@
 import json
 import constants
 import os
+import shutil
 import subprocess
 import tempfile
 import time
@@ -104,19 +105,30 @@ def test_mcp_stdio_transport_responds(platform):
         known_hosts_path = temp_keys_path / "known_hosts"
         pub_key_path = temp_keys_path / "ssh-key.pem.pub"
 
-        subprocess.run(
-            ["ssh-keygen", "-t", "ed25519", "-N", "", "-f", str(pem_path)],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-        if pub_key_path.exists():
-            pub_key_path.unlink()
+        external_ssh_key_path = os.getenv("APX_TEST_SSH_KEY_PATH")
+        external_known_hosts_path = os.getenv("APX_TEST_KNOWN_HOSTS_PATH")
 
-        known_hosts_path.write_text(
-            "172.17.0.1 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFakeKnownHostKeyForIntegrationTestsOnly\n",
-            encoding="utf-8",
-        )
+        if external_ssh_key_path:
+            shutil.copyfile(external_ssh_key_path, pem_path)
+        else:
+            subprocess.run(
+                ["ssh-keygen", "-t", "ed25519", "-N", "", "-f", str(pem_path)],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            if pub_key_path.exists():
+                pub_key_path.unlink()
+
+        if external_known_hosts_path:
+            shutil.copyfile(external_known_hosts_path, known_hosts_path)
+        else:
+            known_hosts_path.write_text(
+                "172.17.0.1 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFakeKnownHostKeyForIntegrationTestsOnly\n",
+                encoding="utf-8",
+            )
+
+        os.chmod(pem_path, 0o600)
         os.chmod(known_hosts_path, 0o644)
 
         print("\n***Generated Dummy SSH Key: ", pem_path)
@@ -223,7 +235,17 @@ def test_mcp_stdio_transport_responds(platform):
                 print("\n***Test NA: MCP mca tool is not supported on this platform: {}".format(platform))
 
             #Check APX Recipe Run Tool Test
-            raw_socket.sendall(_encode_mcp_message(constants.CHECK_APX_RECIPE_RUN_REQUEST))
+            apx_request = json.loads(json.dumps(constants.CHECK_APX_RECIPE_RUN_REQUEST))
+            apx_args = apx_request["params"]["arguments"]
+            apx_args["remote_ip_addr"] = os.getenv("APX_TEST_REMOTE_IP", apx_args["remote_ip_addr"])
+            apx_args["remote_usr"] = os.getenv("APX_TEST_REMOTE_USER", apx_args["remote_usr"])
+            apx_args["cmd"] = os.getenv("APX_TEST_CMD", apx_args["cmd"])
+
+            print("\n***APX Remote User:", apx_args["remote_usr"])
+            print("\n***APX Remote IP:", apx_args["remote_ip_addr"])
+            print("\n***APX Workload Cmd:", apx_args["cmd"])
+
+            raw_socket.sendall(_encode_mcp_message(apx_request))
             check_apx_recipe_run_response = _read_response(8, timeout=60)
             apx_structured = check_apx_recipe_run_response.get("result", {}).get("structuredContent", {})
             print("\n***APX Recipe Run Tool Response Structured Content: ", json.dumps(apx_structured, indent=2))

@@ -45,6 +45,46 @@ jobs:
             --cache-to type=gha,mode=max \
             .
 
+      - name: Prepare SSH target on runner
+        run: |
+          set -euxo pipefail
+          RUNNER_USER="$(whoami)"
+          KEY_PATH="${RUNNER_TEMP}/apx_ci_key"
+          KNOWN_HOSTS_PATH="${RUNNER_TEMP}/apx_ci_known_hosts"
+
+          ssh-keygen -t ed25519 -N "" -f "${KEY_PATH}" -C "apx-ci@github-actions"
+          chmod 600 "${KEY_PATH}"
+
+          mkdir -p "${HOME}/.ssh"
+          chmod 700 "${HOME}/.ssh"
+          touch "${HOME}/.ssh/authorized_keys"
+          chmod 600 "${HOME}/.ssh/authorized_keys"
+          cat "${KEY_PATH}.pub" >> "${HOME}/.ssh/authorized_keys"
+
+          sudo apt-get update
+          sudo apt-get install -y openssh-server
+          sudo mkdir -p /run/sshd
+          sudo sed -i 's/^#\?PubkeyAuthentication .*/PubkeyAuthentication yes/' /etc/ssh/sshd_config
+          sudo sed -i 's/^#\?PasswordAuthentication .*/PasswordAuthentication no/' /etc/ssh/sshd_config
+          sudo sed -i 's/^#\?KbdInteractiveAuthentication .*/KbdInteractiveAuthentication no/' /etc/ssh/sshd_config
+          sudo systemctl restart ssh || sudo service ssh restart || sudo /usr/sbin/sshd
+
+          ssh-keyscan -H 127.0.0.1 > "${KNOWN_HOSTS_PATH}" || true
+          ssh-keyscan -H 172.17.0.1 >> "${KNOWN_HOSTS_PATH}" || true
+          if [ ! -s "${KNOWN_HOSTS_PATH}" ]; then
+            touch "${KNOWN_HOSTS_PATH}"
+          fi
+          chmod 644 "${KNOWN_HOSTS_PATH}"
+
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=no -i "${KEY_PATH}" "${RUNNER_USER}@127.0.0.1" "echo ssh_ok"
+
+          {
+            echo "APX_TEST_SSH_KEY_PATH=${KEY_PATH}"
+            echo "APX_TEST_KNOWN_HOSTS_PATH=${KNOWN_HOSTS_PATH}"
+            echo "APX_TEST_REMOTE_USER=${RUNNER_USER}"
+            echo "APX_TEST_REMOTE_IP=172.17.0.1"
+          } >> "${GITHUB_ENV}"
+
       - name: Run integration tests
         env:
           MCP_IMAGE: arm-mcp:latest

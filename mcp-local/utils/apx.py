@@ -323,17 +323,6 @@ def prepare_target(remote_ip_addr: str, remote_usr: str, ssh_key_path: str, apx_
     _record_debug(list_command, status, list_output)
     if status == 0 and list_output:
         targets = _extract_targets(list_output)
-        if remote_ip_addr in {"localhost", "127.0.0.1"}:
-            localhost_target = targets.get("localhost")
-            if (
-                isinstance(localhost_target, dict)
-                and localhost_target.get("type") == "local"
-            ):
-                return {
-                    "target_id": "localhost",
-                    "debug_trace": debug_trace,
-                }
-
         for target_id, target_info in targets.items():
             value = target_info.get("value", {})
             jumps = value.get("jumps", [])
