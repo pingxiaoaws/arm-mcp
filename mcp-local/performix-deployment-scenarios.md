@@ -41,7 +41,7 @@ Your MCP server/container configuration must mount:
 - the private key file under `/run/keys`
 - the `known_hosts` file under `/run/keys`
 
-The MCP container will discover these mounts from `/proc/self/mounts` and set the internal `SSH_KEY_PATH` and `KNOWN_HOSTS_PATH` values automatically.
+The MCP container will discover these per-file mounts from `/proc/self/mounts` automatically.
 
 ### 3. Target workload must be runnable
 

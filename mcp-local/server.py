@@ -19,7 +19,13 @@ from sentence_transformers import SentenceTransformer
 from utils.config import METADATA_PATH, USEARCH_INDEX_PATH, MODEL_NAME, SUPPORTED_SCANNERS, DEFAULT_ARCH
 from utils.search_utils import build_bm25_index, deduplicate_urls, hybrid_search, load_metadata, load_usearch_index
 from utils.docker_utils import check_docker_image_architectures
-from utils.apx import prepare_target, run_workload, get_results, resolve_apx_ssh_mount_env
+from utils.apx import (
+    prepare_target,
+    run_workload,
+    get_results,
+    resolve_apx_ssh_mount_env,
+    build_apx_ssh_mount_help,
+)
 from utils.migrate_ease_utils import run_migrate_ease_scan
 from utils.skopeo_tool import skopeo_help, skopeo_inspect
 from utils.llvm_mca_tool import mca_help, llvm_mca_analyze
@@ -297,16 +303,18 @@ def apx_recipe_run(cmd:str, remote_ip_addr:str, remote_usr:str, recipe:str="code
     known_hosts_path = ssh_mount_env["known_hosts_path"]
 
     if not key_path or not known_hosts_path:
+        mount_help = build_apx_ssh_mount_help(
+            ssh_mount_env["mount_targets"],
+            known_hosts_reason=ssh_mount_env.get("known_hosts_reason"),
+            key_reason=ssh_mount_env.get("key_reason"),
+        )
         return {
             "status": "error",
             "recipe": recipe,
             "stage": "config_validation",
             "message": "Missing SSH configuration for APX target access.",
-            "suggestion": "Mount both the SSH private key and known_hosts file into /run/keys, then retry.",
-            "details": (
-                "APX looks for SSH_KEY_PATH and KNOWN_HOSTS_PATH first, then auto-discovers mounted files "
-                f"under /run/keys from /proc/self/mounts. Discovered mounts: {ssh_mount_env['mount_targets']}"
-            ),
+            "suggestion": mount_help["suggestion"],
+            "details": mount_help["details"],
         }
 
     target_add_res = prepare_target(remote_ip_addr, remote_usr, key_path, apx_dir)
