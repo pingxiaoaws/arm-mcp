@@ -1,0 +1,137 @@
+All analysis is complete. Here is the full migration report.
+
+---
+
+# Graviton (ARM64) Migration Report
+
+## Project Overview
+
+| Item | Detail |
+|------|--------|
+| **Language** | C++ with x86 SIMD intrinsics |
+| **Base Image** | `amd64/ubuntu:22.04` |
+| **Build System** | Makefile with x86-specific flags |
+| **Python Deps** | numpy, pandas, cryptography, grpcio |
+| **Total Issues Found** | **16** (from migrate_ease_scan) |
+
+---
+
+## 1. Docker Base Image — BLOCKING
+
+| Check | Result |
+|-------|--------|
+| `check_image` | `amd64/ubuntu:22.04` — **missing arm64** |
+| `skopeo` on `amd64/ubuntu:22.04` | Error: no image found for architecture arm64 |
+| `skopeo` on `ubuntu:22.04` | **arm64 supported** (multi-arch image confirmed) |
+
+**Fix:** Change `FROM amd64/ubuntu:22.04` to `FROM ubuntu:22.04`. The official multi-arch image provides both amd64 and arm64 variants.
+
+---
+
+## 2. Dockerfile Build Flags — BLOCKING
+
+**Line 10:** `RUN g++ -O2 -mavx2 -mfma -o app main.cpp`
+
+- `-mavx2` and `-mfma` are x86-specific compiler flags that will fail on ARM64.
+- **Fix:** Replace with `-march=armv8-a+simd` (or `-march=armv8.2-a+fp16+dotprod` for Graviton2+).
+
+---
+
+## 3. Makefile — BLOCKING
+
+**Line 2:** `CFLAGS=-O2 -mavx2 -mfma -march=x86-64-v3`
+
+All three architecture flags are x86-only:
+- `-mavx2` → remove (no AVX on ARM)
+- `-mfma` → remove (NEON FMA is default on Graviton)
+- `-march=x86-64-v3` → change to `-march=armv8-a` (or `armv8.2-a` for Graviton2+)
+
+**Additional note from scanner:** At `-O2`, GCC on ARM64 uses `fmadd` for float multiply-add, which can produce results that differ at the 16th decimal place vs x86. Add `-ffp-contract=off` if bit-exact float reproducibility is required.
+
+---
+
+## 4. C++ Source Code (main.cpp) — BLOCKING
+
+The scanner found **1 incompatible header** and **14 incompatible intrinsics**:
+
+### 4a. Header File (line 2)
+```
+#include <immintrin.h>  // x86-only
+```
+**Fix:** Replace with `#include <arm_neon.h>`
+
+### 4b. SSE Intrinsics — `vector_add_sse()` (lines 7-14)
+
+| Line | x86 Intrinsic | ARM NEON Equivalent |
+|------|--------------|---------------------|
+| 9 | `_mm_loadu_ps()` | `vld1q_f32()` |
+| 10 | `_mm_loadu_ps()` | `vld1q_f32()` |
+| 11 | `_mm_add_ps()` | `vaddq_f32()` |
+| 12 | `_mm_storeu_ps()` | `vst1q_f32()` |
+
+Type mapping: `__m128` → `float32x4_t` (both 128-bit / 4 floats)
+
+### 4c. AVX2 Intrinsics — `dot_product_avx2()` (lines 17-31)
+
+AVX2 operates on 256-bit vectors. ARM NEON is 128-bit, so each AVX2 operation must be split into **two NEON operations** (or use SVE on Graviton3+).
+
+| Line | x86 Intrinsic | ARM NEON Equivalent |
+|------|--------------|---------------------|
+| 18 | `_mm256_setzero_ps()` | Two `vdupq_n_f32(0.0f)` |
+| 20 | `_mm256_loadu_ps()` | Two `vld1q_f32()` (low+high) |
+| 21 | `_mm256_loadu_ps()` | Two `vld1q_f32()` (low+high) |
+| 22 | `_mm256_fmadd_ps()` | Two `vfmaq_f32()` |
+| 25 | `_mm256_extractf128_ps(_, 1)` | Just use the high `float32x4_t` |
+| 26 | `_mm256_castps256_ps128()` | Just use the low `float32x4_t` |
+| 27 | `_mm_add_ps()` | `vaddq_f32()` |
+| 28-29 | `_mm_hadd_ps()` | `vpaddq_f32()` |
+| 30 | `_mm_cvtss_f32()` | `vgetq_lane_f32(_, 0)` |
+
+**Alternative approach:** Use the **sse2neon** header library (`#include "sse2neon.h"`) for a drop-in translation of all SSE/AVX intrinsics to NEON, minimizing manual porting effort. See: [Porting architecture specific intrinsics (Arm Learning Path)](https://learn.arm.com/learning-paths/cross-platform/intrinsics/)
+
+---
+
+## 5. Python Dependencies (requirements.txt) — ALL COMPATIBLE
+
+| Package | Version | ARM64 Compatible Since | Status |
+|---------|---------|----------------------|--------|
+| numpy | 1.24.0 | v1.19.0 (June 2020) | **Compatible** |
+| pandas | 2.0.0 | v1.1.5 (Dec 2020) | **Compatible** |
+| cryptography | 41.0.0 | Supported (OpenSSL-based) | **Compatible** |
+| grpcio | 1.56.0 | Supported | **Compatible** |
+
+No version changes needed.
+
+---
+
+## 6. System Packages (Dockerfile) — ALL COMPATIBLE
+
+| Package | Status |
+|---------|--------|
+| `g++` | Available natively on ARM64 Ubuntu |
+| `libssl-dev` | Available natively on ARM64 Ubuntu |
+
+---
+
+## Summary of Required Changes
+
+| File | Severity | Change |
+|------|----------|--------|
+| `Dockerfile:1` | **Blocking** | `amd64/ubuntu:22.04` → `ubuntu:22.04` |
+| `Dockerfile:10` | **Blocking** | Remove `-mavx2 -mfma`, add ARM flags |
+| `Makefile:2` | **Blocking** | Replace x86 flags with `-march=armv8-a` |
+| `main.cpp:2` | **Blocking** | `<immintrin.h>` → `<arm_neon.h>` |
+| `main.cpp:7-14` | **Blocking** | Rewrite SSE function using NEON intrinsics |
+| `main.cpp:17-31` | **Blocking** | Rewrite AVX2 function using NEON (split 256→2x128) |
+| `requirements.txt` | None | All packages already ARM64 compatible |
+
+### Recommended Migration Strategy
+
+1. **Quick path:** Use **sse2neon** (`#include "sse2neon.h"`) as a drop-in SSE/AVX-to-NEON translation layer. This handles all 14 intrinsic mappings automatically.
+2. **Optimal performance path:** Manually rewrite SIMD code using NEON intrinsics (for SSE parts) and consider **SVE/SVE2** for the AVX2 dot-product on Graviton3+ for wider vector width.
+3. Update Dockerfile and Makefile build flags for ARM64.
+4. All Python dependencies work out of the box on ARM64.
+
+---
+
+Would you like me to proceed with implementing these code changes?
